@@ -1,27 +1,28 @@
+/*
 //------------------------------------------------------------------------------
-// emonGLCD Home Energy Monitor example
-// to be used with nanode Home Energy Monitor example
+// emonGLCD Based LCD Node
+// Based on original code from Open Energy Monitor and Libraries from Jeelabs
 
-// Uses power variable - change as required if your using different ports
-
-// emonGLCD documentation http://openEnergyMonitor.org/emon/emonglcd
+// Desired functionality
+// - LEDs
+// - Power Page
+// - History Page
+// - Weather Page
 
 // RTC to reset Kwh counters at midnight is implemented is software. 
 // Correct time is updated via NanodeRF which gets time from internet
 // Temperature recorded on the emonglcd is also sent to the NanodeRF for online graphing
 
+// emonGLCD documentation http://openEnergyMonitor.org/emon/emonglcd
 // GLCD library by Jean-Claude Wippler: JeeLabs.org
 // 2010-05-28 <jcw@equi4.com> http://opensource.org/licenses/mit-license.php
-//
 // Authors: Glyn Hudson and Trystan Lea
 // Part of the: openenergymonitor.org project
 // Licenced under GNU GPL V3
 // http://openenergymonitor.org/emon/license
 
 // THIS SKETCH REQUIRES:
-
 // Libraries in the standard arduino libraries folder:
-//
 //	- OneWire library	http://www.pjrc.com/teensy/td_libs_OneWire.html
 //	- DallasTemperature	http://download.milesburton.com/Arduino/MaximTemperature
 //                           or https://github.com/milesburton/Arduino-Temperature-Control-Library
@@ -30,31 +31,30 @@
 //	- GLCD_ST7565		https://github.com/jcw/glcdlib
 //
 // Other files in project directory (should appear in the arduino tabs above)
-//	- icons.ino
 //	- templates.ino
-//
 //------------------------------------------------------------------------------
+*/
 
 #include <JeeLib.h>
 #include <GLCD_ST7565.h>
 #include <avr/pgmspace.h>
 GLCD_ST7565 glcd;
 
-#include <OneWire.h>		    // http://www.pjrc.com/teensy/td_libs_OneWire.html
-#include <DallasTemperature.h>      // http://download.milesburton.com/Arduino/MaximTemperature/ (3.7.2 Beta needed for Arduino 1.0)
+#include <OneWire.h>		    
+#include <DallasTemperature.h>     
 
-#include <RTClib.h>                 // Real time clock (RTC) - used for software RTC to reset kWh counters at midnight
-#include <Wire.h>                   // Part of Arduino libraries - needed for RTClib
+#include <RTClib.h>                 
+#include <Wire.h>                 
 RTC_Millis RTC;
 
 //------------------------------------------------------------------------------
 // RFM12B Settings
 //------------------------------------------------------------------------------
-#define MYNODE 11 // Should be unique on network, node ID 30 reserved for base station
-#define freq RF12_868MHZ  // frequency - match to same frequency as RFM12B module (change to 868Mhz or 915Mhz if appropriate)
+#define MYNODE 11 
+#define freq RF12_868MHZ  
 #define group 212 
 
-#define ONE_WIRE_BUS 5  // temperature sensor connection - hard wired 
+#define ONE_WIRE_BUS 5  
 
 unsigned long fast_update, slow_update;
 
@@ -65,18 +65,32 @@ double temp,maxtemp,mintemp;
 //---------------------------------------------------
 // Data structures for transfering data between units
 //---------------------------------------------------
-typedef struct { int power, voltage, battery; } PayloadTX;         // neat way of packaging data for RF comms
+//Node ID 5
+typedef struct { int power, voltage, battery; } PayloadTX;        
 PayloadTX emontx;
 
+//Node ID 18
+typedef struct {int light, humidity, temperature, dewpoint, cloudbase, battery;} PayloadWx;
+PayloadWx wxtx;
+
+//Node ID 17
+typedef struct {byte light; int16_t temperature; int32_t pressure; int battery;} PayloadBaro;
+PayloadBaro barotx;
+
+//Node ID 11
 typedef struct { int temperature; } PayloadGLCD;
 PayloadGLCD emonglcd;
 
 int hour = 12, minute = 0;
 double usekwh = 0;
+double use_history[7];
 
-const int greenLED=6;               // Green tri-color LED
-const int redLED=9;                 // Red tri-color LED
-const int LDRpin=4;    		    // analog pin of onboard lightsensor 
+#define greenLED 6      // Green bi-color LED
+#define redLED 9        // Red bi-color LED
+#define LDRpin 4        // analog pin of onboard lightsensor 
+#define switchEnter 15
+#define switchUp 16
+#define switchDown 19
 int cval_use;
 
 //------------------------------------------------------------------------------
@@ -84,6 +98,7 @@ int cval_use;
 //------------------------------------------------------------------------------
 unsigned long last_emontx;  // Used to count time from last emontx update
 unsigned long last_emonbase;  // Used to count time from last emontx update
+int page;
 
 //------------------------------------------------------------------------------
 // Setup
@@ -106,7 +121,9 @@ void setup()
   pinMode(redLED, OUTPUT); 
   
   RTC.begin(DateTime(__DATE__, __TIME__));
-  Serial.begin(9600);
+  
+  //Serial.begin(9600);
+  //Serial.println("LCD Node");
 }
 
 //------------------------------------------------------------------------------
@@ -120,9 +137,23 @@ void loop()
     if (rf12_crc == 0 && (rf12_hdr & RF12_HDR_CTL) == 0)  // and no rf errors
     {
       int node_id = (rf12_hdr & 0x1F);
-      if (node_id == 5) {emontx = *(PayloadTX*) rf12_data; last_emontx = millis();}  //Assuming 10 is the emonTx NodeID
+      if (node_id == 5) //emonTx NodeID
+      {
+        emontx = *(PayloadTX*) rf12_data;
+        last_emontx = millis();
+      }  
       
-      if (node_id == 15)			//Assuming 15 is the emonBase node ID
+      if (node_id == 17)
+      {
+        barotx = *(PayloadBaro*) rf12_data;
+      }
+      
+      if (node_id == 18)
+      {
+        wxtx = *(PayloadWx*) rf12_data;
+      }
+      
+      if (node_id == 31)			//Time transmission
       {
         RTC.adjust(DateTime(2012, 1, 1, rf12_data[1], rf12_data[2], rf12_data[3]));
         last_emonbase = millis();
@@ -143,18 +174,55 @@ void loop()
     minute = now.minute();
 
     usekwh += (emontx.power * 0.2) / 3600000;
-    if (last_hour == 23 && hour == 00) usekwh = 0; //reset Kwh/d counter at midnight
+    if (last_hour == 23 && hour == 00) 
+    {
+      usekwh = 0; //reset Kwh/d at midnight
+      for(int i = 6; i > 0; i--)
+      {
+        use_history[i] = use_history[i-1];
+      }
+    }
+    
+    use_history[0] = usekwh;
+
     cval_use = cval_use + (emontx.power - cval_use)*0.50;//smooth transitions
     
-    draw_power_page( "POWER" ,cval_use, "USE", usekwh);
-    draw_temperature_time_footer(temp, mintemp, maxtemp, hour,minute);
-    glcd.refresh();
-
-    int LDR = analogRead(LDRpin);                     // Read the LDR Value so we can work out the light level in the room.
-    int LDRbacklight = map(LDR, 0, 1023, 50, 250);    // Map the data from the LDR from 0-1023 (Max seen 1000) to var GLCDbrightness min/max
-    LDRbacklight = constrain(LDRbacklight, 0, 255);   // Constrain the value to make sure its a PWM value 0-255
+    int LDR = analogRead(LDRpin); // Read the LDR Value
+    int LDRbacklight = map(LDR, 0, 1023, 50, 250); // Map the LDR from 0-1023 (Max seen 1000) to var GLCDbrightness min/max
+    LDRbacklight = constrain(LDRbacklight, 0, 255); // Constrain PWM value 0-255
   
-    if ((hour > 22) ||  (hour < 5)) glcd.backLight(0); else glcd.backLight(LDRbacklight);  
+    if ((hour > 22) ||  (hour < 5)) glcd.backLight(0); else glcd.backLight(LDRbacklight);
+    
+    //Page Control
+    bool switch_state = digitalRead(switchEnter);  
+    
+    if (switch_state == 1)
+    {
+      page += 1;
+      if (page > 2)
+      {
+        page = 0;
+      }
+    }
+    
+    if (page == 0) //Standard Power Page
+    {
+      draw_power_page( "POWER" ,cval_use, "USE", usekwh);
+      draw_temperature_time_footer(temp, mintemp, maxtemp, hour,minute);
+      glcd.refresh();
+    }
+    else if (page == 1) //Weather Page
+    {
+      draw_weather_page(wxtx.light, wxtx.humidity, wxtx.temperature, wxtx.dewpoint, wxtx.cloudbase, barotx.pressure);
+      
+      draw_temperature_time_footer(temp, mintemp, maxtemp, hour,minute);
+      glcd.refresh();
+    }
+    else if (page == 2) //History Page
+    {
+      draw_history_page_nosolar(use_history);
+    }
+    
   } 
   
   if ((millis()-slow_update)>10000)
@@ -163,18 +231,17 @@ void loop()
 
     sensors.requestTemperatures();
     temp = (sensors.getTempCByIndex(0));
-    if (temp > maxtemp) maxtemp = temp;
-    if (temp < mintemp) mintemp = temp;
+    if ((temp > -50) && (temp < 70))
+    {
+      if (temp > maxtemp) maxtemp = temp;
+      if (temp < mintemp) mintemp = temp;
+    }
    
     // set emonglcd payload
     emonglcd.temperature = (int) (temp * 100); 
-    Serial.print("temp: ");
-        Serial.println(temp);
-    Serial.print("em.t: ") ; 
-    Serial.println(emonglcd.temperature) ;                        
+                     
     //send temperature data via RFM12B using new rf12_sendNow wrapper -glynhudson
     rf12_sendNow(0, &emonglcd, sizeof emonglcd);
-    
     rf12_sendWait(2);    
   }
 }

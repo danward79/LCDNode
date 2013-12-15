@@ -12,7 +12,7 @@ void draw_power_page(char* powerstr, double powerval, char* energystr,  double e
   glcd.clear();
   glcd.fillRect(0,0,128,64,0);
   
-  char str[50];    			 //variable to store conversion 
+  char str[30];    			 //variable to store conversion 
   glcd.setFont(font_clR6x8);      
   strcpy(str,powerstr);  
   strcat(str," NOW:"); 
@@ -42,7 +42,7 @@ void draw_temperature_time_footer(double temp, double mintemp, double maxtemp, d
 {
   glcd.drawLine(0, 47, 128, 47, WHITE);     //middle horizontal line 
 
-  char str[50];
+  char str[30];
   // GLCD Temperature
   glcd.setFont(font_helvB12);  
   dtostrf(temp,0,1,str); 
@@ -73,4 +73,85 @@ void draw_temperature_time_footer(double temp, double mintemp, double maxtemp, d
 }
 
 
+void draw_weather_page(int light, int humidity, int temperature, int dewpoint, int cloudbase, int32_t pressure)
+{
+  glcd.clear();
+  glcd.setFont(font_clR6x8);
+  glcd.drawString(40, 0, "WEATHER");
+  
+  glcd.setFont(font_clR4x6);           
 
+  glcd.drawString_P(2,9,PSTR("Temperature: "));
+  glcd.drawString_P(2,16,PSTR("Humidity: "));
+  glcd.drawString_P(2,23,PSTR("Light: "));
+  glcd.drawString_P(2,30,PSTR("Pressure: "));
+  glcd.drawString_P(2,37,PSTR("Cloudbase: "));
+  
+  char str[20];
+ 
+  sprintf(str, "%d.%d C", temperature/10, temperature%10);
+  glcd.drawString(55, 9, str);
+  
+  sprintf(str, "%d", humidity/10);
+  strcat(str, " %");
+  glcd.drawString(55, 16, str);
+
+  sprintf(str, "%d", light);
+  strcat(str, " %");
+  glcd.drawString(55, 23, str);
+  
+  sprintf(str, "%d hPa", pressure/100);
+  glcd.drawString(55, 30, str);
+  
+  sprintf(str, "%d ft", cloudbase);
+  glcd.drawString(55, 37, str);
+
+}
+
+
+void draw_history_page_nosolar(double usekwh[7])
+{
+  glcd.clear;
+  glcd.fillRect(0,0,128,64,0);
+  
+  char str[30]; 
+  
+  glcd.setFont(font_clR6x8);
+  glcd.drawString_P(40,0,PSTR("History"));
+  
+  glcd.setFont(font_clR4x6);           
+
+  glcd.drawString_P(2,16,PSTR("Today"));
+  glcd.drawString_P(2,23,PSTR("Yesterday"));
+  glcd.drawString_P(2,30,PSTR("2 days ago"));
+  glcd.drawString_P(2,37,PSTR("3 days ago"));
+  glcd.drawString_P(2,44,PSTR("4 days ago"));
+  glcd.drawString_P(2,51,PSTR("5 days ago"));
+  glcd.drawString_P(2,58,PSTR("6 days ago"));
+  
+  // draw grid consumption history
+  char kWh[4]="kWh";
+
+  dtostrf((usekwh[0]),0,1,str); strcat(str,kWh);
+  glcd.drawString(52,16,str);
+  
+  dtostrf((usekwh[1]),0,1,str); strcat(str,kWh);
+  glcd.drawString(52,23,str);
+  
+  dtostrf((usekwh[2]),0,1,str);  strcat(str,kWh);
+  glcd.drawString(52,30,str);
+  
+  dtostrf((usekwh[3]),0,1,str); strcat(str,kWh);
+  glcd.drawString(52,37,str);
+  
+  dtostrf((usekwh[4]),0,1,str); strcat(str,kWh);
+  glcd.drawString(52,44,str);
+  
+  dtostrf((usekwh[5]),0,1,str); strcat(str,kWh);
+  glcd.drawString(52,51,str);
+  
+  dtostrf((usekwh[6]),0,1,str); strcat(str,kWh);
+  glcd.drawString(52,58,str);
+  
+  glcd.refresh();
+}
