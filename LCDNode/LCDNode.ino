@@ -51,12 +51,12 @@ RTC_Millis RTC;
 // RFM12B Settings
 //------------------------------------------------------------------------------
 #define MYNODE 11 
-#define freq RF12_868MHZ  
+#define freq RF12_433MHZ  
 #define group 212 
 
 #define ONE_WIRE_BUS 5  
 
-unsigned long fast_update, slow_update;
+unsigned long fast_update, slow_update, backLightOverrideTime;
 
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
@@ -73,6 +73,10 @@ PayloadTX emontx;
 typedef struct {int light, humidity, temperature, dewpoint, cloudbase, battery;} PayloadWx;
 PayloadWx wxtx;
 
+//Node ID 16
+typedef struct {byte light; int humidity; int temperature; byte vcc;} PayloadOutdoor;
+PayloadOutdoor outdoornode;
+
 //Node ID 17
 typedef struct {byte light; int16_t temperature; int32_t pressure; int battery;} PayloadBaro;
 PayloadBaro barotx;
@@ -84,6 +88,8 @@ PayloadGLCD emonglcd;
 int hour = 12, minute = 0;
 double usekwh = 0;
 double use_history[7];
+boolean backLightOverride = false;
+
 
 #define greenLED 6      // Green bi-color LED
 #define redLED 9        // Red bi-color LED
@@ -143,6 +149,11 @@ void loop()
         last_emontx = millis();
       }  
       
+      if (node_id == 16)
+      {
+        outdoornode = *(PayloadOutdoor*) rf12_data;
+      }
+      
       if (node_id == 17)
       {
         barotx = *(PayloadBaro*) rf12_data;
@@ -191,7 +202,23 @@ void loop()
     int LDRbacklight = map(LDR, 0, 1023, 50, 250); // Map the LDR from 0-1023 (Max seen 1000) to var GLCDbrightness min/max
     LDRbacklight = constrain(LDRbacklight, 0, 255); // Constrain PWM value 0-255
   
-    if ((hour > 22) ||  (hour < 5)) glcd.backLight(0); else glcd.backLight(LDRbacklight);
+    if ((hour > 21) ||  (hour < 6)) {
+      if (!backLightOverride) {
+        glcd.backLight(0); 
+      } else {
+        glcd.backLight(LDRbacklight);
+      }
+      
+      if ((millis() - backLightOverrideTime) > 10000) {
+        glcd.backLight(0);
+        backLightOverride = false;
+      }
+      
+    } else {
+      
+      glcd.backLight(LDRbacklight);
+      
+    }
     
     //Page Control
     bool switch_state = digitalRead(switchEnter);  
@@ -205,6 +232,14 @@ void loop()
       }
     }
     
+    switch_state = digitalRead(switchUp) or digitalRead(switchDown);  
+    
+    if (switch_state == 1)
+    {
+      backLightOverride = true;
+      backLightOverrideTime = millis();
+    }
+    
     if (page == 0) //Standard Power Page
     {
       draw_power_page( "POWER" ,cval_use, "USE", usekwh);
@@ -213,7 +248,7 @@ void loop()
     }
     else if (page == 1) //Weather Page
     {
-      draw_weather_page(wxtx.light, wxtx.humidity, wxtx.temperature, wxtx.dewpoint, wxtx.cloudbase, barotx.pressure);
+      draw_weather_page((outdoornode.light * 100/255), outdoornode.humidity, outdoornode.temperature, wxtx.dewpoint, wxtx.cloudbase, barotx.pressure);
       
       draw_temperature_time_footer(temp, mintemp, maxtemp, hour,minute);
       glcd.refresh();
@@ -238,10 +273,10 @@ void loop()
     }
    
     // set emonglcd payload
-    emonglcd.temperature = (int) (temp * 100); 
+     emonglcd.temperature = (int) (temp * 100); 
                      
     //send temperature data via RFM12B using new rf12_sendNow wrapper -glynhudson
-    rf12_sendNow(0, &emonglcd, sizeof emonglcd);
-    rf12_sendWait(2);    
+     rf12_sendNow(0, &emonglcd, sizeof emonglcd);
+     rf12_sendWait(2);    
   }
 }
