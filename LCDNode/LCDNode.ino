@@ -82,7 +82,7 @@ typedef struct {byte light; int16_t temperature; int32_t pressure; int battery;}
 PayloadBaro barotx;
 
 //Node ID 11
-typedef struct { int temperature; } PayloadGLCD;
+typedef struct { int temperature; byte light; } PayloadGLCD;
 PayloadGLCD emonglcd;
 
 int hour = 12, minute = 0;
@@ -274,6 +274,7 @@ void loop()
    
     // set emonglcd payload
      emonglcd.temperature = (int) (temp * 100); 
+     emonglcd.light = 255 - analogRead(LDRpin) / 4;
                      
     //send temperature data via RFM12B using new rf12_sendNow wrapper -glynhudson
      rf12_sendNow(0, &emonglcd, sizeof emonglcd);
