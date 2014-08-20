@@ -128,8 +128,8 @@ void setup()
   
   RTC.begin(DateTime(__DATE__, __TIME__));
   
-  //Serial.begin(9600);
-  //Serial.println("LCD Node");
+  Serial.begin(9600);
+  Serial.println("LCD Node");
 }
 
 //------------------------------------------------------------------------------
